@@ -5,10 +5,6 @@
 #include <ctime>
 #include <cstdlib>
 
-// Tetris simple en C++ usando SFML
-// Compilar:
-// g++ Tetris.cpp -o tetris -lsfml-graphics -lsfml-window -lsfml-system
-
 const int FIELD_W = 10;
 const int FIELD_H = 20;
 const int BLOCK_SIZE = 30; // tamaño de cada bloque en pixeles
