@@ -5,6 +5,8 @@
 #include <ctime>
 #include <cstdlib>
 #include <optional>
+#include <iostream>
+#include <fstream>
 
 const int FIELD_W = 10;
 const int FIELD_H = 20;
@@ -46,17 +48,45 @@ bool doesFit(int tetrominoIndex, int rotation, int posX, int posY, const std::ve
     return true;
 }
 
+int loadHighScore() {
+    int highscore = 0;
+    std::ifstream file("save.dat", std::ios::binary);
+    if (file.is_open()) {
+        file.read(reinterpret_cast<char*>(&highscore), sizeof(highscore));
+        file.close();
+    }
+    return highscore;
+}
+
+void saveHighScore(int highscore) {
+    std::ofstream file("save.dat", std::ios::binary);
+    if (file.is_open()) {
+        file.write(reinterpret_cast<const char*>(&highscore), sizeof(highscore));
+        file.close();
+    }
+}
+
 int main() {
     std::srand((unsigned)std::time(nullptr));
 
     sf::RenderWindow window(sf::VideoMode({(unsigned int)(FIELD_W * BLOCK_SIZE + 200), (unsigned int)(FIELD_H * BLOCK_SIZE)}), "Tetris");
     window.setFramerateLimit(60);
 
+    // Cargar fuente UNA SOLA VEZ al inicio
+    sf::Font font;
+    bool fontLoaded = false;
+    if (font.openFromFile("arial.ttf")) {
+        fontLoaded = true;
+    } else {
+        std::cerr << "Error: No se pudo cargar arial.ttf. Asegúrate de que el archivo esté en la misma carpeta que el ejecutable." << std::endl;
+    }
+
     sf::RectangleShape blockShape(sf::Vector2f{BLOCK_SIZE - 2.0f, BLOCK_SIZE - 2.0f});
 
     std::vector<int> field(FIELD_W * FIELD_H, 0);
 
     int currentPiece = std::rand() % 7;
+    int nextPiece = std::rand() % 7;
     int currentRotation = 0;
     int currentX = FIELD_W / 2 - 2;
     int currentY = 0;
@@ -69,6 +99,7 @@ int main() {
     bool gameOver = false;
 
     int score = 0;
+    int highScore = loadHighScore();
 
     // Colores por pieza (7 piezas)
     std::array<sf::Color, 8> colors = {sf::Color::Black,
@@ -76,8 +107,10 @@ int main() {
         sf::Color::Yellow, sf::Color::Green, sf::Color::Magenta, sf::Color::Red};
 
     while (window.isOpen()) {
-        while (const std::optional event = window.pollEvent()) {
-            if (event->is<sf::Event::Closed>()) window.close();
+        while (auto event = window.pollEvent()) {
+            if (event->is<sf::Event::Closed>()) {
+                window.close();
+            }
             
             if (!gameOver) {
                 if (const auto* keyPressed = event->getIf<sf::Event::KeyPressed>()) {
@@ -100,10 +133,12 @@ int main() {
                         // reiniciar
                         field.assign(FIELD_W * FIELD_H, 0);
                         currentPiece = std::rand() % 7;
+                        nextPiece = std::rand() % 7;
                         currentRotation = 0;
                         currentX = FIELD_W / 2 - 2;
                         currentY = 0;
                         score = 0;
+                        highScore = loadHighScore();
                         gameOver = false;
                         clock.restart();
                     }
@@ -111,58 +146,65 @@ int main() {
             }
         }
 
-        // temporizador de caída
-        delay = clock.getElapsedTime().asSeconds();
-        if (delay >= speed || forceDown) {
-            forceDown = false;
-            clock.restart();
-            if (doesFit(currentPiece, currentRotation, currentX, currentY + 1, field)) {
-                currentY++;
-            } else {
-                // fijar pieza al campo
-                for (int px = 0; px < 4; px++)
+        if (!gameOver) {
+            // temporizador de caída
+            delay = clock.getElapsedTime().asSeconds();
+            if (delay >= speed || forceDown) {
+                forceDown = false;
+                clock.restart();
+                if (doesFit(currentPiece, currentRotation, currentX, currentY + 1, field)) {
+                    currentY++;
+                } else {
+                    // fijar pieza al campo
+                    for (int px = 0; px < 4; px++)
+                        for (int py = 0; py < 4; py++) {
+                            int pi = rotateIndex(px, py, currentRotation);
+                            if (tetromino[currentPiece][pi] == 'X') {
+                                int fx = currentX + px;
+                                int fy = currentY + py;
+                                if (fy >= 0 && fy < FIELD_H && fx >= 0 && fx < FIELD_W)
+                                    field[fy * FIELD_W + fx] = currentPiece + 1; // color index
+                            }
+                        }
+
+                    // comprobar líneas completas
+                    std::vector<int> lines;
                     for (int py = 0; py < 4; py++) {
-                        int pi = rotateIndex(px, py, currentRotation);
-                        if (tetromino[currentPiece][pi] == 'X') {
-                            int fx = currentX + px;
-                            int fy = currentY + py;
-                            if (fy >= 0 && fy < FIELD_H && fx >= 0 && fx < FIELD_W)
-                                field[fy * FIELD_W + fx] = currentPiece + 1; // color index
+                        if (currentY + py < FIELD_H) {
+                            bool line = true;
+                            int y = currentY + py;
+                            for (int x = 0; x < FIELD_W; x++)
+                                if (field[y * FIELD_W + x] == 0) { line = false; break; }
+                            if (line) lines.push_back(y);
                         }
                     }
 
-                // comprobar líneas completas
-                std::vector<int> lines;
-                for (int py = 0; py < 4; py++) {
-                    if (currentY + py < FIELD_H) {
-                        bool line = true;
-                        int y = currentY + py;
-                        for (int x = 0; x < FIELD_W; x++)
-                            if (field[y * FIELD_W + x] == 0) { line = false; break; }
-                        if (line) lines.push_back(y);
+                    if (!lines.empty()) {
+                        // eliminar líneas y desplazar hacia abajo
+                        for (int l : lines) {
+                            for (int x = 0; x < FIELD_W; x++) field[l * FIELD_W + x] = 0;
+                            for (int y = l; y > 0; y--)
+                                for (int x = 0; x < FIELD_W; x++) field[y * FIELD_W + x] = field[(y - 1) * FIELD_W + x];
+                            for (int x = 0; x < FIELD_W; x++) field[x] = 0;
+                        }
+                        // Puntaje: 100 por línea
+                        score += 100 * (int)lines.size();
                     }
-                }
 
-                if (!lines.empty()) {
-                    // eliminar líneas y desplazar hacia abajo
-                    for (int l : lines) {
-                        for (int x = 0; x < FIELD_W; x++) field[l * FIELD_W + x] = 0;
-                        for (int y = l; y > 0; y--)
-                            for (int x = 0; x < FIELD_W; x++) field[y * FIELD_W + x] = field[(y - 1) * FIELD_W + x];
-                        for (int x = 0; x < FIELD_W; x++) field[x] = 0;
+                    // nueva pieza (usar la siguiente)
+                    currentPiece = nextPiece;
+                    nextPiece = std::rand() % 7;
+                    currentRotation = 0;
+                    currentX = FIELD_W / 2 - 2;
+                    currentY = 0;
+
+                    if (!doesFit(currentPiece, currentRotation, currentX, currentY, field)) {
+                        gameOver = true;
+                        if (score > highScore) {
+                            highScore = score;
+                            saveHighScore(highScore);
+                        }
                     }
-                    // Puntaje: 100 por línea, +50 por cada línea extra encadenada
-                    score += 100 * (int)lines.size();
-                }
-
-                // nueva pieza
-                currentPiece = std::rand() % 7;
-                currentRotation = 0;
-                currentX = FIELD_W / 2 - 2;
-                currentY = 0;
-
-                if (!doesFit(currentPiece, currentRotation, currentX, currentY, field)) {
-                    gameOver = true;
                 }
             }
         }
@@ -174,56 +216,73 @@ int main() {
         for (int y = 0; y < FIELD_H; y++)
             for (int x = 0; x < FIELD_W; x++) {
                 int val = field[y * FIELD_W + x];
-                blockShape.setPosition({(float)x * BLOCK_SIZE + 1, (float)y * BLOCK_SIZE + 1});
+                blockShape.setPosition({(float)x * BLOCK_SIZE + 1.0f, (float)y * BLOCK_SIZE + 1.0f});
                 if (val == 0) {
                     blockShape.setFillColor(sf::Color(50,50,50));
                     blockShape.setOutlineColor(sf::Color(25,25,25));
-                    blockShape.setOutlineThickness(1);
+                    blockShape.setOutlineThickness(1.0f);
                 } else {
                     blockShape.setFillColor(colors[val]);
                     blockShape.setOutlineColor(sf::Color::Black);
-                    blockShape.setOutlineThickness(1);
+                    blockShape.setOutlineThickness(1.0f);
                 }
                 window.draw(blockShape);
             }
 
         // Dibujar pieza actual
-        for (int px = 0; px < 4; px++)
-            for (int py = 0; py < 4; py++) {
-                int pi = rotateIndex(px, py, currentRotation);
-                if (tetromino[currentPiece][pi] == 'X') {
-                    int fx = currentX + px;
-                    int fy = currentY + py;
-                    blockShape.setPosition({(float)fx * BLOCK_SIZE + 1, (float)fy * BLOCK_SIZE + 1});
-                    blockShape.setFillColor(colors[currentPiece + 1]);
-                    blockShape.setOutlineColor(sf::Color::Black);
-                    window.draw(blockShape);
+        if (!gameOver) {
+            for (int px = 0; px < 4; px++)
+                for (int py = 0; py < 4; py++) {
+                    int pi = rotateIndex(px, py, currentRotation);
+                    if (tetromino[currentPiece][pi] == 'X') {
+                        int fx = currentX + px;
+                        int fy = currentY + py;
+                        blockShape.setPosition({(float)fx * BLOCK_SIZE + 1.0f, (float)fy * BLOCK_SIZE + 1.0f});
+                        blockShape.setFillColor(colors[currentPiece + 1]);
+                        blockShape.setOutlineColor(sf::Color::Black);
+                        blockShape.setOutlineThickness(1.0f);
+                        window.draw(blockShape);
+                    }
                 }
-            }
-
-        // UI lateral: puntuación y controles
-        static sf::Font font;
-        static bool fontLoaded = false;
-        if (!fontLoaded) {
-            if (font.openFromFile("arial.ttf")) {
-                fontLoaded = true;
-            }
         }
-        
+
+        // UI lateral
         if (fontLoaded) {
             sf::Text txt(font);
             txt.setCharacterSize(18);
             txt.setFillColor(sf::Color::White);
-            txt.setPosition({(float)FIELD_W * BLOCK_SIZE + 10, 10.0f});
-            txt.setString("Puntos: " + std::to_string(score));
+            txt.setPosition({(float)FIELD_W * BLOCK_SIZE + 10.0f, 10.0f});
+            txt.setString("Puntos: " + std::to_string(score) + "\nRecord: " + std::to_string(highScore));
             window.draw(txt);
 
-            sf::Text controls(font);
-            controls.setCharacterSize(14);
-            controls.setFillColor(sf::Color::White);
-            controls.setPosition({(float)FIELD_W * BLOCK_SIZE + 10, 40.0f});
-            controls.setString("Controles:\nFlecha Izq/Dcha: Mover\nFlecha Arriba: Rotar\nFlecha Abajo: Soft Drop\nSpace: Hard Drop\nR: Reiniciar (game over)");
-            window.draw(controls);
+            // Siguiente pieza
+            sf::Text nextTxt(font);
+            nextTxt.setCharacterSize(18);
+            nextTxt.setFillColor(sf::Color::White);
+            nextTxt.setPosition({(float)FIELD_W * BLOCK_SIZE + 10.0f, 70.0f});
+            nextTxt.setString("Siguiente:");
+            window.draw(nextTxt);
+
+            for (int px = 0; px < 4; px++)
+                for (int py = 0; py < 4; py++) {
+                    int pi = rotateIndex(px, py, 0); // rotación 0 para preview
+                    if (tetromino[nextPiece][pi] == 'X') {
+                        blockShape.setPosition({(float)FIELD_W * BLOCK_SIZE + 30.0f + (float)px * (BLOCK_SIZE - 5), 100.0f + (float)py * (BLOCK_SIZE - 5)});
+                        blockShape.setScale({0.8f, 0.8f}); // un poco más pequeña
+                        blockShape.setFillColor(colors[nextPiece + 1]);
+                        blockShape.setOutlineColor(sf::Color::Black);
+                        blockShape.setOutlineThickness(1.0f);
+                        window.draw(blockShape);
+                    }
+                }
+            blockShape.setScale({1.0f, 1.0f}); // reset scale
+
+            sf::Text controlTxt(font);
+            controlTxt.setCharacterSize(14);
+            controlTxt.setFillColor(sf::Color::White);
+            controlTxt.setPosition({(float)FIELD_W * BLOCK_SIZE + 10.0f, 220.0f});
+            controlTxt.setString("Controles:\nFlechas: Mover/Rotar\nEspacio: Hard Drop\nR: Reiniciar");
+            window.draw(controlTxt);
 
             if (gameOver) {
                 sf::Text go(font);
@@ -231,7 +290,7 @@ int main() {
                 go.setFillColor(sf::Color::Red);
                 go.setStyle(sf::Text::Bold);
                 go.setString("GAME OVER\nR para reiniciar");
-                go.setPosition({20.0f, (float)FIELD_H * BLOCK_SIZE / 2 - 50});
+                go.setPosition({20.0f, (float)FIELD_H * BLOCK_SIZE / 2.0f - 50.0f});
                 window.draw(go);
             }
         }
