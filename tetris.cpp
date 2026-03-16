@@ -7,6 +7,8 @@
 #include <optional>
 #include <iostream>
 #include <fstream>
+#include <cmath>
+#include <cstdint>
 
 const int FIELD_W = 10;
 const int FIELD_H = 20;
@@ -66,19 +68,49 @@ void saveHighScore(int highscore) {
     }
 }
 
+// Función para dibujar un bloque con efecto de relieve (bevel)
+void drawBlock(sf::RenderWindow& window, sf::RectangleShape& shape, int x, int y, sf::Color color, float alpha = 255) {
+    shape.setPosition({(float)x * BLOCK_SIZE, (float)y * BLOCK_SIZE});
+    
+    // Color principal
+    sf::Color mainColor = color;
+    mainColor.a = static_cast<std::uint8_t>(alpha);
+    shape.setFillColor(mainColor);
+    shape.setOutlineThickness(0);
+    window.draw(shape);
+
+    if (alpha > 200) { // Solo relieve si no es transparente (no ghost)
+        // Brillo superior e izquierdo
+        sf::RectangleShape highlight(sf::Vector2f{BLOCK_SIZE - 2.0f, 2.0f});
+        highlight.setFillColor(sf::Color(255, 255, 255, 100));
+        highlight.setPosition({(float)x * BLOCK_SIZE + 1, (float)y * BLOCK_SIZE + 1});
+        window.draw(highlight);
+        
+        highlight.setSize({2.0f, BLOCK_SIZE - 2.0f});
+        window.draw(highlight);
+
+        // Sombra inferior y derecha
+        sf::RectangleShape shadow(sf::Vector2f{BLOCK_SIZE - 2.0f, 2.0f});
+        shadow.setFillColor(sf::Color(0, 0, 0, 100));
+        shadow.setPosition({(float)x * BLOCK_SIZE + 1, (float)y * BLOCK_SIZE + BLOCK_SIZE - 3});
+        window.draw(shadow);
+
+        shadow.setSize({2.0f, BLOCK_SIZE - 2.0f});
+        shadow.setPosition({(float)x * BLOCK_SIZE + BLOCK_SIZE - 3, (float)y * BLOCK_SIZE + 1});
+        window.draw(shadow);
+    }
+}
+
 int main() {
     std::srand((unsigned)std::time(nullptr));
 
-    sf::RenderWindow window(sf::VideoMode({(unsigned int)(FIELD_W * BLOCK_SIZE + 200), (unsigned int)(FIELD_H * BLOCK_SIZE)}), "Tetris");
+    sf::RenderWindow window(sf::VideoMode({(unsigned int)(FIELD_W * BLOCK_SIZE + 200), (unsigned int)(FIELD_H * BLOCK_SIZE)}), "Tetris Pro");
     window.setFramerateLimit(60);
 
-    // Cargar fuente UNA SOLA VEZ al inicio
     sf::Font font;
     bool fontLoaded = false;
     if (font.openFromFile("arial.ttf")) {
         fontLoaded = true;
-    } else {
-        std::cerr << "Error: No se pudo cargar arial.ttf. Asegúrate de que el archivo esté en la misma carpeta que el ejecutable." << std::endl;
     }
 
     sf::RectangleShape blockShape(sf::Vector2f{BLOCK_SIZE - 2.0f, BLOCK_SIZE - 2.0f});
@@ -91,7 +123,7 @@ int main() {
     int currentX = FIELD_W / 2 - 2;
     int currentY = 0;
 
-    float speed = 0.5f; // segundos por caída
+    float speed = 0.5f;
     sf::Clock clock;
     float delay = 0.0f;
 
@@ -100,10 +132,11 @@ int main() {
 
     int score = 0;
     int highScore = loadHighScore();
+    int linesClearedTotal = 0;
+    int level = 1;
 
-    // Colores por pieza (7 piezas)
     std::array<sf::Color, 8> colors = {sf::Color::Black,
-        sf::Color::Cyan, sf::Color::Blue, sf::Color(255,165,0), // orange
+        sf::Color::Cyan, sf::Color::Blue, sf::Color(255,165,0),
         sf::Color::Yellow, sf::Color::Green, sf::Color::Magenta, sf::Color::Red};
 
     while (window.isOpen()) {
@@ -130,7 +163,6 @@ int main() {
             } else {
                 if (const auto* keyPressed = event->getIf<sf::Event::KeyPressed>()) {
                     if (keyPressed->code == sf::Keyboard::Key::R) {
-                        // reiniciar
                         field.assign(FIELD_W * FIELD_H, 0);
                         currentPiece = std::rand() % 7;
                         nextPiece = std::rand() % 7;
@@ -138,6 +170,9 @@ int main() {
                         currentX = FIELD_W / 2 - 2;
                         currentY = 0;
                         score = 0;
+                        linesClearedTotal = 0;
+                        level = 1;
+                        speed = 0.5f;
                         highScore = loadHighScore();
                         gameOver = false;
                         clock.restart();
@@ -147,7 +182,6 @@ int main() {
         }
 
         if (!gameOver) {
-            // temporizador de caída
             delay = clock.getElapsedTime().asSeconds();
             if (delay >= speed || forceDown) {
                 forceDown = false;
@@ -155,7 +189,6 @@ int main() {
                 if (doesFit(currentPiece, currentRotation, currentX, currentY + 1, field)) {
                     currentY++;
                 } else {
-                    // fijar pieza al campo
                     for (int px = 0; px < 4; px++)
                         for (int py = 0; py < 4; py++) {
                             int pi = rotateIndex(px, py, currentRotation);
@@ -163,35 +196,41 @@ int main() {
                                 int fx = currentX + px;
                                 int fy = currentY + py;
                                 if (fy >= 0 && fy < FIELD_H && fx >= 0 && fx < FIELD_W)
-                                    field[fy * FIELD_W + fx] = currentPiece + 1; // color index
+                                    field[fy * FIELD_W + fx] = currentPiece + 1;
                             }
                         }
 
-                    // comprobar líneas completas
-                    std::vector<int> lines;
+                    int linesRemoved = 0;
                     for (int py = 0; py < 4; py++) {
                         if (currentY + py < FIELD_H) {
                             bool line = true;
                             int y = currentY + py;
                             for (int x = 0; x < FIELD_W; x++)
                                 if (field[y * FIELD_W + x] == 0) { line = false; break; }
-                            if (line) lines.push_back(y);
+                            if (line) {
+                                linesRemoved++;
+                                for (int x = 0; x < FIELD_W; x++) field[y * FIELD_W + x] = 0;
+                                for (int d = y; d > 0; d--)
+                                    for (int x = 0; x < FIELD_W; x++) field[d * FIELD_W + x] = field[(d - 1) * FIELD_W + x];
+                                for (int x = 0; x < FIELD_W; x++) field[x] = 0;
+                            }
                         }
                     }
 
-                    if (!lines.empty()) {
-                        // eliminar líneas y desplazar hacia abajo
-                        for (int l : lines) {
-                            for (int x = 0; x < FIELD_W; x++) field[l * FIELD_W + x] = 0;
-                            for (int y = l; y > 0; y--)
-                                for (int x = 0; x < FIELD_W; x++) field[y * FIELD_W + x] = field[(y - 1) * FIELD_W + x];
-                            for (int x = 0; x < FIELD_W; x++) field[x] = 0;
-                        }
-                        // Puntaje: 100 por línea
-                        score += 100 * (int)lines.size();
+                    if (linesRemoved > 0) {
+                        score += 100 * linesRemoved * level;
+                        linesClearedTotal += linesRemoved;
+                        // Subir de nivel cada 10 líneas
+                        level = (linesClearedTotal / 10) + 1;
+                        speed = 0.5f * std::pow(0.85f, (float)level - 1); // Aumentar velocidad
                     }
 
-                    // nueva pieza (usar la siguiente)
+                    // Guardado inmediato si supera récord
+                    if (score > highScore) {
+                        highScore = score;
+                        saveHighScore(highScore);
+                    }
+
                     currentPiece = nextPiece;
                     nextPiece = std::rand() % 7;
                     currentRotation = 0;
@@ -200,97 +239,113 @@ int main() {
 
                     if (!doesFit(currentPiece, currentRotation, currentX, currentY, field)) {
                         gameOver = true;
-                        if (score > highScore) {
-                            highScore = score;
-                            saveHighScore(highScore);
-                        }
                     }
                 }
             }
         }
 
-        // Render
-        window.clear(sf::Color(30, 30, 30));
+        window.clear(sf::Color(20, 20, 20));
 
         // Dibujar campo
         for (int y = 0; y < FIELD_H; y++)
             for (int x = 0; x < FIELD_W; x++) {
                 int val = field[y * FIELD_W + x];
-                blockShape.setPosition({(float)x * BLOCK_SIZE + 1.0f, (float)y * BLOCK_SIZE + 1.0f});
                 if (val == 0) {
-                    blockShape.setFillColor(sf::Color(50,50,50));
-                    blockShape.setOutlineColor(sf::Color(25,25,25));
-                    blockShape.setOutlineThickness(1.0f);
+                    // Cuadrícula sutil
+                    sf::RectangleShape cell({BLOCK_SIZE-1.0f, BLOCK_SIZE-1.0f});
+                    cell.setPosition({(float)x * BLOCK_SIZE, (float)y * BLOCK_SIZE});
+                    cell.setFillColor(sf::Color(35, 35, 35));
+                    window.draw(cell);
                 } else {
-                    blockShape.setFillColor(colors[val]);
-                    blockShape.setOutlineColor(sf::Color::Black);
-                    blockShape.setOutlineThickness(1.0f);
+                    drawBlock(window, blockShape, x, y, colors[val]);
                 }
-                window.draw(blockShape);
             }
 
-        // Dibujar pieza actual
         if (!gameOver) {
+            // Calcular posición fantasma
+            int ghostY = currentY;
+            while (doesFit(currentPiece, currentRotation, currentX, ghostY + 1, field)) ghostY++;
+
+            // Dibujar fantasma
             for (int px = 0; px < 4; px++)
                 for (int py = 0; py < 4; py++) {
                     int pi = rotateIndex(px, py, currentRotation);
                     if (tetromino[currentPiece][pi] == 'X') {
-                        int fx = currentX + px;
-                        int fy = currentY + py;
-                        blockShape.setPosition({(float)fx * BLOCK_SIZE + 1.0f, (float)fy * BLOCK_SIZE + 1.0f});
-                        blockShape.setFillColor(colors[currentPiece + 1]);
-                        blockShape.setOutlineColor(sf::Color::Black);
-                        blockShape.setOutlineThickness(1.0f);
-                        window.draw(blockShape);
+                        drawBlock(window, blockShape, currentX + px, ghostY + py, colors[currentPiece + 1], 60); // Alpha 60
+                    }
+                }
+
+            // Dibujar pieza actual
+            for (int px = 0; px < 4; px++)
+                for (int py = 0; py < 4; py++) {
+                    int pi = rotateIndex(px, py, currentRotation);
+                    if (tetromino[currentPiece][pi] == 'X') {
+                        drawBlock(window, blockShape, currentX + px, currentY + py, colors[currentPiece + 1]);
                     }
                 }
         }
 
-        // UI lateral
         if (fontLoaded) {
+            float uiX = (float)FIELD_W * BLOCK_SIZE + 20.0f;
+            
             sf::Text txt(font);
-            txt.setCharacterSize(18);
-            txt.setFillColor(sf::Color::White);
-            txt.setPosition({(float)FIELD_W * BLOCK_SIZE + 10.0f, 10.0f});
-            txt.setString("Puntos: " + std::to_string(score) + "\nRecord: " + std::to_string(highScore));
+            txt.setCharacterSize(20);
+            txt.setFillColor(sf::Color::Yellow);
+            txt.setPosition({uiX, 20.0f});
+            txt.setString("RECORD\n" + std::to_string(highScore));
             window.draw(txt);
 
-            // Siguiente pieza
-            sf::Text nextTxt(font);
-            nextTxt.setCharacterSize(18);
-            nextTxt.setFillColor(sf::Color::White);
-            nextTxt.setPosition({(float)FIELD_W * BLOCK_SIZE + 10.0f, 70.0f});
-            nextTxt.setString("Siguiente:");
-            window.draw(nextTxt);
+            txt.setFillColor(sf::Color::White);
+            txt.setPosition({uiX, 80.0f});
+            txt.setString("PUNTOS\n" + std::to_string(score));
+            window.draw(txt);
 
+            txt.setPosition({uiX, 140.0f});
+            txt.setString("NIVEL: " + std::to_string(level));
+            window.draw(txt);
+
+            txt.setCharacterSize(18);
+            txt.setPosition({uiX, 190.0f});
+            txt.setString("SIGUIENTE:");
+            window.draw(txt);
+
+            // Preview siguiente pieza con relieve
             for (int px = 0; px < 4; px++)
                 for (int py = 0; py < 4; py++) {
-                    int pi = rotateIndex(px, py, 0); // rotación 0 para preview
+                    int pi = rotateIndex(px, py, 0);
                     if (tetromino[nextPiece][pi] == 'X') {
-                        blockShape.setPosition({(float)FIELD_W * BLOCK_SIZE + 30.0f + (float)px * (BLOCK_SIZE - 5), 100.0f + (float)py * (BLOCK_SIZE - 5)});
-                        blockShape.setScale({0.8f, 0.8f}); // un poco más pequeña
-                        blockShape.setFillColor(colors[nextPiece + 1]);
-                        blockShape.setOutlineColor(sf::Color::Black);
-                        blockShape.setOutlineThickness(1.0f);
-                        window.draw(blockShape);
+                        blockShape.setSize({BLOCK_SIZE-5.0f, BLOCK_SIZE-5.0f});
+                        // Ajuste manual de posición para centrar preview
+                        float px_adj = uiX + 10.0f + (float)px * (BLOCK_SIZE - 4.0f);
+                        float py_adj = 230.0f + (float)py * (BLOCK_SIZE - 4.0f);
+                        
+                        // Versión simplificada de drawBlock para el preview
+                        sf::RectangleShape previewRect(sf::Vector2f{BLOCK_SIZE-5.0f, BLOCK_SIZE-5.0f});
+                        previewRect.setPosition({px_adj, py_adj});
+                        previewRect.setFillColor(colors[nextPiece + 1]);
+                        window.draw(previewRect);
                     }
                 }
-            blockShape.setScale({1.0f, 1.0f}); // reset scale
+            blockShape.setSize({BLOCK_SIZE-2.0f, BLOCK_SIZE-2.0f}); // reset
 
             sf::Text controlTxt(font);
             controlTxt.setCharacterSize(14);
-            controlTxt.setFillColor(sf::Color::White);
-            controlTxt.setPosition({(float)FIELD_W * BLOCK_SIZE + 10.0f, 220.0f});
-            controlTxt.setString("Controles:\nFlechas: Mover/Rotar\nEspacio: Hard Drop\nR: Reiniciar");
+            controlTxt.setFillColor(sf::Color(180, 180, 180));
+            controlTxt.setPosition({uiX, 400.0f});
+            controlTxt.setString("CONTROLES:\nFlechas: Mover\nArriba: Rotar\nEspacio: Caida rapida\nR: Reiniciar");
             window.draw(controlTxt);
 
             if (gameOver) {
+                sf::RectangleShape overlay(sf::Vector2f{(float)FIELD_W * BLOCK_SIZE, (float)FIELD_H * BLOCK_SIZE});
+                overlay.setFillColor(sf::Color(0, 0, 0, 150));
+                window.draw(overlay);
+
                 sf::Text go(font);
                 go.setCharacterSize(36);
                 go.setFillColor(sf::Color::Red);
                 go.setStyle(sf::Text::Bold);
-                go.setString("GAME OVER\nR para reiniciar");
-                go.setPosition({20.0f, (float)FIELD_H * BLOCK_SIZE / 2.0f - 50.0f});
+                go.setString("GAME OVER\nPulsa R");
+                go.setPosition({30.0f, (float)FIELD_H * BLOCK_SIZE / 2.0f - 50.0f});
                 window.draw(go);
             }
         }
