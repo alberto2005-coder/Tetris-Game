@@ -4,6 +4,7 @@
 #include <string>
 #include <ctime>
 #include <cstdlib>
+#include <optional>
 
 const int FIELD_W = 10;
 const int FIELD_H = 20;
@@ -48,10 +49,10 @@ bool doesFit(int tetrominoIndex, int rotation, int posX, int posY, const std::ve
 int main() {
     std::srand((unsigned)std::time(nullptr));
 
-    sf::RenderWindow window(sf::VideoMode(FIELD_W * BLOCK_SIZE + 200, FIELD_H * BLOCK_SIZE), "Tetris");
+    sf::RenderWindow window(sf::VideoMode({(unsigned int)(FIELD_W * BLOCK_SIZE + 200), (unsigned int)(FIELD_H * BLOCK_SIZE)}), "Tetris");
     window.setFramerateLimit(60);
 
-    sf::RectangleShape blockShape(sf::Vector2f(BLOCK_SIZE - 2, BLOCK_SIZE - 2));
+    sf::RectangleShape blockShape(sf::Vector2f{BLOCK_SIZE - 2.0f, BLOCK_SIZE - 2.0f});
 
     std::vector<int> field(FIELD_W * FIELD_H, 0);
 
@@ -75,36 +76,37 @@ int main() {
         sf::Color::Yellow, sf::Color::Green, sf::Color::Magenta, sf::Color::Red};
 
     while (window.isOpen()) {
-        sf::Event event;
-        while (window.pollEvent(event)) {
-            if (event.type == sf::Event::Closed) window.close();
-            if (event.type == sf::Event::KeyPressed && !gameOver) {
-                if (event.key.code == sf::Keyboard::Left) {
-                    if (doesFit(currentPiece, currentRotation, currentX - 1, currentY, field)) currentX--;
-                } else if (event.key.code == sf::Keyboard::Right) {
-                    if (doesFit(currentPiece, currentRotation, currentX + 1, currentY, field)) currentX++;
-                } else if (event.key.code == sf::Keyboard::Up) {
-                    if (doesFit(currentPiece, currentRotation + 1, currentX, currentY, field)) currentRotation = (currentRotation + 1) % 4;
-                } else if (event.key.code == sf::Keyboard::Down) {
-                    
-                    if (doesFit(currentPiece, currentRotation, currentX, currentY + 1, field)) currentY++;
-                } else if (event.key.code == sf::Keyboard::Space) {
-                    
-                    while (doesFit(currentPiece, currentRotation, currentX, currentY + 1, field)) currentY++;
-                    forceDown = true;
+        while (const std::optional event = window.pollEvent()) {
+            if (event->is<sf::Event::Closed>()) window.close();
+            
+            if (!gameOver) {
+                if (const auto* keyPressed = event->getIf<sf::Event::KeyPressed>()) {
+                    if (keyPressed->code == sf::Keyboard::Key::Left) {
+                        if (doesFit(currentPiece, currentRotation, currentX - 1, currentY, field)) currentX--;
+                    } else if (keyPressed->code == sf::Keyboard::Key::Right) {
+                        if (doesFit(currentPiece, currentRotation, currentX + 1, currentY, field)) currentX++;
+                    } else if (keyPressed->code == sf::Keyboard::Key::Up) {
+                        if (doesFit(currentPiece, currentRotation + 1, currentX, currentY, field)) currentRotation = (currentRotation + 1) % 4;
+                    } else if (keyPressed->code == sf::Keyboard::Key::Down) {
+                        if (doesFit(currentPiece, currentRotation, currentX, currentY + 1, field)) currentY++;
+                    } else if (keyPressed->code == sf::Keyboard::Key::Space) {
+                        while (doesFit(currentPiece, currentRotation, currentX, currentY + 1, field)) currentY++;
+                        forceDown = true;
+                    }
                 }
-            }
-            if (event.type == sf::Event::KeyPressed && gameOver) {
-                if (event.key.code == sf::Keyboard::R) {
-                    // reiniciar
-                    field.assign(FIELD_W * FIELD_H, 0);
-                    currentPiece = std::rand() % 7;
-                    currentRotation = 0;
-                    currentX = FIELD_W / 2 - 2;
-                    currentY = 0;
-                    score = 0;
-                    gameOver = false;
-                    clock.restart();
+            } else {
+                if (const auto* keyPressed = event->getIf<sf::Event::KeyPressed>()) {
+                    if (keyPressed->code == sf::Keyboard::Key::R) {
+                        // reiniciar
+                        field.assign(FIELD_W * FIELD_H, 0);
+                        currentPiece = std::rand() % 7;
+                        currentRotation = 0;
+                        currentX = FIELD_W / 2 - 2;
+                        currentY = 0;
+                        score = 0;
+                        gameOver = false;
+                        clock.restart();
+                    }
                 }
             }
         }
@@ -172,7 +174,7 @@ int main() {
         for (int y = 0; y < FIELD_H; y++)
             for (int x = 0; x < FIELD_W; x++) {
                 int val = field[y * FIELD_W + x];
-                blockShape.setPosition(x * BLOCK_SIZE + 1, y * BLOCK_SIZE + 1);
+                blockShape.setPosition({(float)x * BLOCK_SIZE + 1, (float)y * BLOCK_SIZE + 1});
                 if (val == 0) {
                     blockShape.setFillColor(sf::Color(50,50,50));
                     blockShape.setOutlineColor(sf::Color(25,25,25));
@@ -192,7 +194,7 @@ int main() {
                 if (tetromino[currentPiece][pi] == 'X') {
                     int fx = currentX + px;
                     int fy = currentY + py;
-                    blockShape.setPosition(fx * BLOCK_SIZE + 1, fy * BLOCK_SIZE + 1);
+                    blockShape.setPosition({(float)fx * BLOCK_SIZE + 1, (float)fy * BLOCK_SIZE + 1});
                     blockShape.setFillColor(colors[currentPiece + 1]);
                     blockShape.setOutlineColor(sf::Color::Black);
                     window.draw(blockShape);
@@ -200,35 +202,38 @@ int main() {
             }
 
         // UI lateral: puntuación y controles
-        sf::Font font;
-        if (!font.loadFromFile("arial.ttf")) {
-            // fallback: usar fuente por defecto (si no carga, no muestra texto)
+        static sf::Font font;
+        static bool fontLoaded = false;
+        if (!fontLoaded) {
+            if (font.openFromFile("arial.ttf")) {
+                fontLoaded = true;
+            }
         }
-        sf::Text txt;
-        txt.setFont(font);
-        txt.setCharacterSize(18);
-        txt.setFillColor(sf::Color::White);
-        txt.setPosition(FIELD_W * BLOCK_SIZE + 10, 10);
-        txt.setString("Puntos: " + std::to_string(score));
-        window.draw(txt);
+        
+        if (fontLoaded) {
+            sf::Text txt(font);
+            txt.setCharacterSize(18);
+            txt.setFillColor(sf::Color::White);
+            txt.setPosition({(float)FIELD_W * BLOCK_SIZE + 10, 10.0f});
+            txt.setString("Puntos: " + std::to_string(score));
+            window.draw(txt);
 
-        sf::Text controls;
-        controls.setFont(font);
-        controls.setCharacterSize(14);
-        controls.setFillColor(sf::Color::White);
-        controls.setPosition(FIELD_W * BLOCK_SIZE + 10, 40);
-        controls.setString("Controles:\nFlecha Izq/Dcha: Mover\nFlecha Arriba: Rotar\nFlecha Abajo: Soft Drop\nSpace: Hard Drop\nR: Reiniciar (game over)");
-        window.draw(controls);
+            sf::Text controls(font);
+            controls.setCharacterSize(14);
+            controls.setFillColor(sf::Color::White);
+            controls.setPosition({(float)FIELD_W * BLOCK_SIZE + 10, 40.0f});
+            controls.setString("Controles:\nFlecha Izq/Dcha: Mover\nFlecha Arriba: Rotar\nFlecha Abajo: Soft Drop\nSpace: Hard Drop\nR: Reiniciar (game over)");
+            window.draw(controls);
 
-        if (gameOver) {
-            sf::Text go;
-            go.setFont(font);
-            go.setCharacterSize(36);
-            go.setFillColor(sf::Color::Red);
-            go.setStyle(sf::Text::Bold);
-            go.setString("GAME OVER\nR para reiniciar");
-            go.setPosition(20, FIELD_H * BLOCK_SIZE / 2 - 50);
-            window.draw(go);
+            if (gameOver) {
+                sf::Text go(font);
+                go.setCharacterSize(36);
+                go.setFillColor(sf::Color::Red);
+                go.setStyle(sf::Text::Bold);
+                go.setString("GAME OVER\nR para reiniciar");
+                go.setPosition({20.0f, (float)FIELD_H * BLOCK_SIZE / 2 - 50});
+                window.draw(go);
+            }
         }
 
         window.display();
