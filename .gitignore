@@ -34,3 +34,6 @@
 */output/
 */bin/
 /Tetris_distribution/
+
+# Dependencias
+node_modules/
